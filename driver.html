@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Farebox Driver</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<style>
+  :root{
+    --bg-deep:#0A101C; --bg-panel:#111A2B; --bg-raised:#182640; --line:#243350;
+    --text-hi:#E9EEF7; --text-mid:#9AA9C4; --text-dim:#5C6C8A;
+    --amber:#F2A93B; --ok:#34D399; --warn:#FBBF24; --bad:#F87171;
+    --disp:'Space Grotesk', sans-serif; --body:'Inter', sans-serif; --mono:'IBM Plex Mono', monospace;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; background:var(--bg-deep); color:var(--text-hi); font-family:var(--body);
+    min-height:100%; overscroll-behavior:none; }
+  #app{ max-width:480px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; padding:16px; }
+
+  header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .mark{ font-family:var(--disp); font-weight:700; font-size:19px; }
+  .mark span{ color:var(--amber); }
+  .role-tag{ font-family:var(--mono); font-size:10px; color:var(--text-dim); letter-spacing:1px; text-transform:uppercase; }
+
+  .card{ background:var(--bg-panel); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  .label{ font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:1px; color:var(--text-dim); margin-bottom:8px; }
+
+  select{
+    width:100%; background:var(--bg-raised); border:1px solid var(--line); color:var(--text-hi);
+    padding:12px; border-radius:9px; font-family:var(--body); font-size:15px; outline:none; appearance:none;
+  }
+  select:focus{ border-color:var(--amber); }
+
+  #goLive{
+    width:100%; padding:18px; border:none; border-radius:12px; font-family:var(--disp); font-weight:700;
+    font-size:17px; letter-spacing:0.3px; cursor:pointer; background:var(--amber); color:#1A1300;
+    display:flex; align-items:center; justify-content:center; gap:10px; transition:background .2s;
+  }
+  #goLive.live{ background:var(--ok); color:#052014; }
+  #goLive .pulse{ width:8px; height:8px; border-radius:50%; background:#1A1300; }
+  #goLive.live .pulse{ background:#052014; animation:blink 1.4s infinite; }
+  @keyframes blink{ 0%,100%{ opacity:1; } 50%{ opacity:0.25; } }
+
+  #statusRow{ display:flex; justify-content:space-between; margin-top:12px; font-family:var(--mono); font-size:11.5px; color:var(--text-dim); }
+  #statusRow b{ color:var(--text-mid); font-weight:500; }
+
+  #miniMap{ height:150px; border-radius:10px; margin-top:12px; overflow:hidden; border:1px solid var(--line); }
+  .leaflet-control-attribution{
+    background:rgba(17,26,43,0.75) !important; color:var(--text-dim) !important;
+    font-family:var(--mono); font-size:9px !important; padding:0 4px !important;
+  }
+
+  .counter{ display:flex; align-items:center; justify-content:center; gap:22px; margin:6px 0 10px; }
+  .counter button{
+    width:56px; height:56px; border-radius:50%; border:1px solid var(--line); background:var(--bg-raised);
+    color:var(--text-hi); font-size:26px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+  .counter button:active{ background:var(--line); }
+  .counter .figure{ text-align:center; min-width:90px; }
+  .counter .num{ font-family:var(--disp); font-weight:700; font-size:34px; line-height:1; }
+  .counter .cap{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px; }
+
+  .occ-track{ height:10px; background:var(--line); border-radius:6px; overflow:hidden; margin-top:6px; }
+  .occ-fill{ height:100%; border-radius:6px; transition:width .3s ease, background-color .3s ease; }
+  .occ-readout{ display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:6px; }
+
+  .quick-row{ display:flex; gap:8px; margin-top:12px; }
+  .quick-btn{
+    flex:1; padding:10px 4px; border-radius:8px; border:1px solid var(--line); background:var(--bg-raised);
+    color:var(--text-mid); font-family:var(--mono); font-size:11px; cursor:pointer; text-align:center;
+  }
+  .quick-btn:active{ border-color:var(--amber); color:var(--text-hi); }
+
+  .hint{ font-family:var(--body); font-size:12.5px; color:var(--text-dim); line-height:1.5; }
+  .hint b{ color:var(--text-mid); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="mark">FARE<span>BOX</span></div>
+    <div class="role-tag">Driver console</div>
+  </header>
+
+  <div class="card">
+    <div class="label">Vehicle</div>
+    <select id="vehicleSelect"></select>
+  </div>
+
+  <div class="card">
+    <div class="label">Passengers aboard</div>
+    <div class="counter">
+      <button id="minusBtn">−</button>
+      <div class="figure">
+        <div class="num" id="paxNum">0</div>
+        <div class="cap" id="paxCap">of 60</div>
+      </div>
+      <button id="plusBtn">+</button>
+    </div>
+    <div class="occ-track"><div class="occ-fill" id="occFill" style="width:0%; background:var(--ok)"></div></div>
+    <div class="occ-readout"><span id="occLabel">Low</span><span id="occPct">0%</span></div>
+    <div class="quick-row">
+      <div class="quick-btn" data-pct="20">Quiet</div>
+      <div class="quick-btn" data-pct="55">Filling up</div>
+      <div class="quick-btn" data-pct="90">Nearly full</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">Location sharing</div>
+    <button id="goLive"><span class="pulse"></span><span id="goLiveText">Go live</span></button>
+    <div id="statusRow">
+      <span>GPS accuracy: <b id="accVal">—</b></span>
+      <span>Last sync: <b id="syncVal">—</b></span>
+    </div>
+    <div id="miniMap"></div>
+  </div>
+
+  <div class="card">
+    <div class="hint">
+      Keep this screen open and your phone unlocked while driving.
+      Passengers see your live position and crowding on the
+      <b>Farebox</b> map as soon as you go live.
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ---------------------------------------------------------------
+   FIREBASE SETUP — replace with YOUR project's config.
+   Get this from: Firebase Console → Project Settings → General →
+   "Your apps" → Web app → SDK setup and configuration.
+--------------------------------------------------------------- */
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+  projectId: "YOUR_PROJECT",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// Must match the vehicle roster in farebox.html so passenger view can find these IDs.
+const VEHICLES = [
+  {id:'1042', route:'Route 1 · Riverside',      cap:60, color:'#F2A93B'},
+  {id:'1047', route:'Route 1 · Riverside',      cap:60, color:'#F2A93B'},
+  {id:'2011', route:'Route 2 · Harborline',     cap:45, color:'#2DD4BF'},
+  {id:'2016', route:'Route 2 · Harborline',     cap:45, color:'#2DD4BF'},
+  {id:'3003', route:'Route 3 · Highline Loop',  cap:70, color:'#FB7185'},
+  {id:'3008', route:'Route 3 · Highline Loop',  cap:70, color:'#FB7185'},
+  {id:'4020', route:'Route 4 · Airport Express',cap:80, color:'#A78BFA'},
+];
+
+const vehicleSelect = document.getElementById('vehicleSelect');
+VEHICLES.forEach(v=>{
+  const opt = document.createElement('option');
+  opt.value = v.id;
+  opt.textContent = `#${v.id} — ${v.route}`;
+  vehicleSelect.appendChild(opt);
+});
+
+let currentVehicle = VEHICLES[0];
+let pax = 0;
+let watchId = null;
+let lastPos = null;
+let writeTimer = null;
+
+function occLevelColor(pct){
+  if(pct < 40) return {c:'var(--ok)', label:'Low'};
+  if(pct <= 75) return {c:'var(--warn)', label:'Moderate'};
+  return {c:'var(--bad)', label:'Crowded'};
+}
+
+function refreshOccUI(){
+  const pct = Math.round((pax / currentVehicle.cap) * 100);
+  const lvl = occLevelColor(pct);
+  document.getElementById('paxNum').textContent = pax;
+  document.getElementById('paxCap').textContent = `of ${currentVehicle.cap}`;
+  document.getElementById('occFill').style.width = pct + '%';
+  document.getElementById('occFill').style.background = lvl.c;
+  document.getElementById('occLabel').textContent = lvl.label;
+  document.getElementById('occLabel').style.color = lvl.c;
+  document.getElementById('occPct').textContent = pct + '%';
+}
+
+vehicleSelect.addEventListener('change', ()=>{
+  currentVehicle = VEHICLES.find(v=>v.id === vehicleSelect.value);
+  pax = 0;
+  refreshOccUI();
+});
+
+document.getElementById('plusBtn').addEventListener('click', ()=>{
+  pax = Math.min(currentVehicle.cap, pax + 1);
+  refreshOccUI();
+});
+document.getElementById('minusBtn').addEventListener('click', ()=>{
+  pax = Math.max(0, pax - 1);
+  refreshOccUI();
+});
+document.querySelectorAll('.quick-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const pct = parseInt(btn.dataset.pct, 10);
+    pax = Math.round((pct/100) * currentVehicle.cap);
+    refreshOccUI();
+  });
+});
+refreshOccUI();
+
+/* ---------- mini map (driver's own position preview) ---------- */
+const map = L.map('miniMap', { zoomControl:false, attributionControl:true, dragging:false, scrollWheelZoom:false })
+  .setView([14.605, 121.013], 14);
+
+// Real street tiles from OpenStreetMap's free public server — no API
+// key or billing needed. (Google Maps tiles require a Google Cloud
+// key + billing, so this is the true no-cost option.)
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+let selfMarker = null;
+
+/* ---------- broadcasting to shared storage ---------- */
+async function broadcastPosition(lat, lng, accuracy){
+  const pct = Math.round((pax / currentVehicle.cap) * 100);
+  const payload = { lat, lng, occupancyPct: pct, routeName: currentVehicle.route, updatedAt: Date.now() };
+  try{
+    await db.ref('vehicles/' + currentVehicle.id).set(payload);
+    document.getElementById('syncVal').textContent = new Date().toLocaleTimeString([], {hour12:false});
+    document.getElementById('accVal').textContent = accuracy ? Math.round(accuracy) + ' m' : '—';
+  }catch(e){
+    document.getElementById('syncVal').textContent = 'sync failed';
+  }
+}
+
+const goLiveBtn = document.getElementById('goLive');
+const goLiveText = document.getElementById('goLiveText');
+let isLive = false;
+
+function startSharing(){
+  if(!navigator.geolocation){
+    alert('This browser does not support location sharing.');
+    return;
+  }
+  // If this tab loses connection or closes without pressing "stop",
+  // Firebase removes the vehicle entry automatically so it doesn't
+  // get stuck showing a stale position on the passenger map.
+  db.ref('vehicles/' + currentVehicle.id).onDisconnect().remove();
+
+  watchId = navigator.geolocation.watchPosition(
+    (pos)=>{
+      const {latitude, longitude, accuracy} = pos.coords;
+      lastPos = [latitude, longitude];
+      if(!selfMarker){
+        selfMarker = L.circleMarker(lastPos, { radius:7, color:currentVehicle.color, weight:2, fillColor:currentVehicle.color, fillOpacity:0.9 }).addTo(map);
+      } else {
+        selfMarker.setLatLng(lastPos);
+      }
+      map.panTo(lastPos);
+      // throttle writes to ~every 4s regardless of GPS update rate
+      if(!writeTimer){
+        broadcastPosition(latitude, longitude, accuracy);
+        writeTimer = setTimeout(()=>{ writeTimer = null; }, 4000);
+      }
+    },
+    (err)=>{
+      alert('Location error: ' + err.message + '\n\nMake sure location permission is granted and you\'re on HTTPS.');
+      stopSharing();
+    },
+    { enableHighAccuracy:true, maximumAge:2000, timeout:10000 }
+  );
+  isLive = true;
+  goLiveBtn.classList.add('live');
+  goLiveText.textContent = 'Sharing live — tap to stop';
+  vehicleSelect.disabled = true;
+}
+
+function stopSharing(){
+  if(watchId !== null) navigator.geolocation.clearWatch(watchId);
+  watchId = null;
+  isLive = false;
+  goLiveBtn.classList.remove('live');
+  goLiveText.textContent = 'Go live';
+  vehicleSelect.disabled = false;
+  // cancel the pending auto-cleanup and remove the entry right now
+  db.ref('vehicles/' + currentVehicle.id).onDisconnect().cancel();
+  db.ref('vehicles/' + currentVehicle.id).remove();
+}
+
+goLiveBtn.addEventListener('click', ()=>{
+  if(isLive) stopSharing(); else startSharing();
+});
+
+// keep broadcasting current occupancy even between GPS callbacks
+setInterval(()=>{
+  if(isLive && lastPos){
+    broadcastPosition(lastPos[0], lastPos[1], null);
+  }
+}, 4000);
+</script>
+</body>
+</html>
